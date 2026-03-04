@@ -3,24 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "docker start lakadscore_db 2>/dev/null; bun run --watch src/server.ts",
+    "start": "bun run src/server.ts",
+    "db:start": "docker start lakadscore_db",
+    "db:stop": "docker stop lakadscore_db",
+    "db:studio": "bunx prisma studio",
+    "db:migrate": "bunx prisma migrate dev",
+    "db:reset": "bunx prisma migrate reset",
+    "typecheck": "bun x tsc --noEmit"
   },
   "dependencies": {
-    "next": "16.1.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "@prisma/adapter-pg": "^7.4.2",
+    "@prisma/client": "^7.4.2",
+    "pg": "^8.19.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.1.6",
-    "tailwindcss": "^4",
+    "@types/pg": "^8.18.0",
+    "bun-types": "latest",
+    "prisma": "^7.4.2",
     "typescript": "^5"
   }
 }

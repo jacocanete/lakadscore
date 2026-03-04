@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Score Cache ---
+
+model ScoreCache {
+  id         String   @id @default(cuid())
+  gridCellId String   @unique @map("grid_cell_id")
+  lat        Float
+  lng        Float
+  resolution Int
+  result     Json
+  computedAt DateTime @default(now()) @map("computed_at")
+  expiresAt  DateTime @map("expires_at")
+
+  @@index([lat, lng])
+  @@map("score_cache")
+}
+
+// --- Infrastructure Reports ---
+
+enum ReportType {
+  sidewalk_good
+  sidewalk_poor
+  sidewalk_missing
+  crossing_marked
+  crossing_unmarked
+  street_light
+  no_street_light
+  flood_prone
+  construction_blocked
+  stray_animals
+  bike_lane
+  bike_friendly_road
+  dangerous_intersection
+  bike_parking
+}
+
+enum ReportStatus {
+  pending
+  verified
+  rejected
+  expired
+}
+
+model InfrastructureReport {
+  id            String       @id @default(cuid())
+  lat           Float
+  lng           Float
+  type          ReportType
+  description   String?
+  status        ReportStatus @default(pending)
+  confirmations Int          @default(0)
+  userId        String?      @map("user_id")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  votes ReportVote[]
+
+  @@index([lat, lng])
+  @@index([type])
+  @@index([status])
+  @@map("infrastructure_reports")
+}
+
+model ReportVote {
+  id        String   @id @default(cuid())
+  reportId  String   @map("report_id")
+  userId    String   @map("user_id")
+  isConfirm Boolean  @map("is_confirm")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  report InfrastructureReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@map("report_votes")
+}
+
+// --- Crowdsourced Transit Routes ---
+
+enum TransitMode {
+  jeepney
+  uv_express
+  tricycle
+  bus
+  train
+}
+
+enum TransitRouteStatus {
+  pending
+  verified
+  rejected
+}
+
+model TransitRoute {
+  id             String             @id @default(cuid())
+  name           String
+  mode           TransitMode
+  waypoints      Json
+  fare           Float?
+  operatingHours String?            @map("operating_hours")
+  status         TransitRouteStatus @default(pending)
+  confirmations  Int                @default(0)
+  userId         String?            @map("user_id")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  @@index([mode])
+  @@index([status])
+  @@map("transit_routes")
+}
