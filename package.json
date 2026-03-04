@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "docker start lakadscore_db 2>/dev/null; bun run --watch src/server.ts",
     "start": "bun run src/server.ts",
+    "db:create": "docker run -d --name lakadscore_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=lakadscore -p 5433:5432 postgis/postgis:16-3.4-alpine",
     "db:start": "docker start lakadscore_db",
     "db:stop": "docker stop lakadscore_db",
     "db:studio": "bunx prisma studio",

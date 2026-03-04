@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: lakadscore
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    image: ghcr.io/jacocanete/lakadscore:latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:3001"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/lakadscore?schema=public
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      LAKADSCORE_API_KEY: ${LAKADSCORE_API_KEY}
+      PORT: 3001
+      SCORE_CACHE_TTL_DAYS: ${SCORE_CACHE_TTL_DAYS:-90}
+      GRID_RESOLUTION_METERS: ${GRID_RESOLUTION_METERS:-100}
+      MAX_AMENITY_RADIUS_METERS: ${MAX_AMENITY_RADIUS_METERS:-2400}
+      RATE_LIMIT_RPM: ${RATE_LIMIT_RPM:-30}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
