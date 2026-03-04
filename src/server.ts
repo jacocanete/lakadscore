@@ -6,6 +6,7 @@ import { snapToGrid } from "@/lib/grid/snap"
 import { getCachedScore, getCacheStats } from "@/lib/db/score-cache"
 import { createReport, getNearbyReports, voteOnReport, getReportStats } from "@/lib/db/reports"
 import { createTransitRoute, getTransitRoutes, confirmTransitRoute } from "@/lib/db/transit-routes"
+import { assessHazards } from "@/lib/hazard/client"
 import type { ReportType } from "@/generated/prisma/client"
 
 const env = getEnv()
@@ -316,6 +317,58 @@ async function handlePatchTransitRoute(req: Request): Promise<Response> {
   }
 }
 
+const hazardQuerySchema = z.object({
+  lat: z.coerce
+    .number()
+    .min(4.5, "Latitude must be within the Philippines")
+    .max(21.5, "Latitude must be within the Philippines"),
+  lng: z.coerce
+    .number()
+    .min(116, "Longitude must be within the Philippines")
+    .max(127, "Longitude must be within the Philippines"),
+})
+
+async function handleGetHazard(req: Request): Promise<Response> {
+  const ip = getClientIp(req)
+  const { allowed, remaining, resetAt } = checkRateLimit(ip)
+
+  if (!allowed) {
+    return json(
+      { error: "Rate limit exceeded. Try again later." },
+      429,
+      {
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": new Date(resetAt).toISOString(),
+        "Retry-After": String(Math.ceil((resetAt - Date.now()) / 1000)),
+      }
+    )
+  }
+
+  const url = new URL(req.url)
+  const parsed = hazardQuerySchema.safeParse({
+    lat: url.searchParams.get("lat"),
+    lng: url.searchParams.get("lng"),
+  })
+
+  if (!parsed.success) {
+    const errors = parsed.error.issues.map((i) => ({
+      field: i.path.join("."),
+      message: i.message,
+    }))
+    return json({ error: "Invalid parameters", errors }, 400)
+  }
+
+  try {
+    const assessment = await assessHazards(parsed.data.lat, parsed.data.lng)
+    return json(assessment, 200, {
+      "X-RateLimit-Remaining": String(remaining),
+    })
+  } catch (err) {
+    console.error("Hazard assessment failed:", err)
+    return json({ error: "Failed to assess hazards. Please try again." }, 500)
+  }
+}
+
 async function handleHealth(): Promise<Response> {
   try {
     const [cache, reports] = await Promise.all([
@@ -361,6 +414,9 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     GET: handleGetTransitRoutes,
     POST: handlePostTransitRoute,
     PATCH: handlePatchTransitRoute,
+  },
+  "/api/hazard": {
+    GET: handleGetHazard,
   },
   "/api/health": {
     GET: handleHealth,

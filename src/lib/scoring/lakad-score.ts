@@ -2,8 +2,10 @@ import type {
   AmenityCategory,
   CategoryScore,
   LakadScore,
+  PedestrianFriendliness,
   PlaceResult,
 } from "@/lib/types"
+import type { PedestrianMetrics } from "@/lib/db/roads"
 import {
   AMENITY_CATEGORIES,
   AMENITY_WEIGHTS,
@@ -77,15 +79,62 @@ function getLabel(score: number): LakadScore["label"] {
 }
 
 /**
+ * Compute a pedestrian friendliness modifier from road network metrics.
+ *
+ * Based on WalkScore's approach: intersection density, block length, and
+ * road network density all influence how walkable an area actually is.
+ *
+ * Returns a modifier between 0.6 and 1.15:
+ *  - Dense grid with short blocks and many intersections: up to 1.15
+ *  - Sparse suburban layout with long blocks: down to 0.6
+ */
+function computePedestrianModifier(metrics: PedestrianMetrics): PedestrianFriendliness {
+  // Intersection density score (0-1)
+  // 15+ intersections within 500m radius = excellent walkable grid
+  const intersectionScore = Math.min(metrics.intersectionCount / 15, 1.0)
+
+  // Block length score (0-1)
+  // Shorter blocks = more walkable. 80m avg = perfect, 300m+ = poor
+  let blockScore = 0.5
+  if (metrics.avgBlockLengthMeters !== null) {
+    if (metrics.avgBlockLengthMeters <= 80) {
+      blockScore = 1.0
+    } else if (metrics.avgBlockLengthMeters >= 300) {
+      blockScore = 0.0
+    } else {
+      blockScore = 1.0 - (metrics.avgBlockLengthMeters - 80) / 220
+    }
+  }
+
+  // Road density score (0-1)
+  // 30+ km/sq km = dense urban grid, <5 = very sparse
+  const densityScore = Math.min(metrics.roadDensityKmPerSqKm / 30, 1.0)
+
+  // Weighted combination: intersection density matters most
+  const raw = intersectionScore * 0.45 + blockScore * 0.30 + densityScore * 0.25
+
+  // Map to modifier range: 0.6 (worst) to 1.15 (best)
+  const modifier = 0.6 + raw * 0.55
+
+  return {
+    intersectionDensity: metrics.intersectionCount,
+    avgBlockLengthMeters: metrics.avgBlockLengthMeters,
+    roadDensityKmPerSqKm: metrics.roadDensityKmPerSqKm,
+    modifier: Math.round(modifier * 1000) / 1000,
+  }
+}
+
+/**
  * Compute the LakadScore (walk score).
  *
- * Two-phase scoring:
- *  1. Per-category weighted scores (using improved proximity + density + choice)
- *  2. Coverage breadth bonus — having more categories covered boosts the score
+ * Three-phase scoring:
+ *  1. Per-category weighted scores (proximity + density + choice)
+ *  2. Coverage breadth bonus/penalty
+ *  3. Pedestrian friendliness modifier (intersection density, block length, road density)
  */
 export function computeLakadScore(
   amenitiesByCategory: Map<AmenityCategory, PlaceResult[]>,
-  pedestrianModifier: number = 1.0
+  pedestrianMetrics: PedestrianMetrics
 ): LakadScore {
   const categories: CategoryScore[] = []
   let weightedSum = 0
@@ -106,6 +155,7 @@ export function computeLakadScore(
       score: Math.round(score * 100),
       nearestDistanceMeters: nearestDistance,
       placesFound: places.length,
+      places,
     })
 
     weightedSum += score * weight
@@ -115,25 +165,24 @@ export function computeLakadScore(
   const totalCategories = Object.keys(AMENITY_CATEGORIES).length
   const baseScore = totalWeight > 0 ? (weightedSum / totalWeight) * 100 : 0
 
-  // Coverage breadth bonus:
-  // If you have 8/9 or 9/9 categories covered, boost by up to 8%.
-  // If you have <5/9, penalize by up to 10%.
   const coverageRatio = coveredCategories / totalCategories
   let coverageModifier = 1.0
   if (coverageRatio >= 0.85) {
-    coverageModifier = 1.0 + (coverageRatio - 0.85) * 0.5 // up to +7.5%
+    coverageModifier = 1.0 + (coverageRatio - 0.85) * 0.5
   } else if (coverageRatio < 0.55) {
-    coverageModifier = 0.9 + coverageRatio * 0.18 // penalizes low coverage
+    coverageModifier = 0.9 + coverageRatio * 0.18
   }
 
+  const pedestrianFriendliness = computePedestrianModifier(pedestrianMetrics)
+
   const adjustedScore = Math.round(
-    Math.min(baseScore * pedestrianModifier * coverageModifier, 100)
+    Math.min(baseScore * pedestrianFriendliness.modifier * coverageModifier, 100)
   )
 
   return {
     score: adjustedScore,
     label: getLabel(adjustedScore),
     categories,
-    pedestrianModifier,
+    pedestrianFriendliness,
   }
 }

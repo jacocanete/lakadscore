@@ -54,6 +54,8 @@ async function searchNearby(
   return res.json() as Promise<NearbySearchResponse>
 }
 
+const WALK_SPEED_METERS_PER_MIN = 80
+
 function toPlaceResults(
   response: NearbySearchResponse,
   originLat: number,
@@ -63,21 +65,25 @@ function toPlaceResults(
 
   return response.places
     .filter((p) => p.location)
-    .map((p) => ({
-      placeId: p.id,
-      name: p.displayName?.text ?? "Unknown",
-      location: {
-        lat: p.location!.latitude,
-        lng: p.location!.longitude,
-      },
-      types: p.types ?? [],
-      distanceMeters: haversineDistance(
+    .map((p) => {
+      const distanceMeters = haversineDistance(
         originLat,
         originLng,
         p.location!.latitude,
         p.location!.longitude
-      ),
-    }))
+      )
+      return {
+        placeId: p.id,
+        name: p.displayName?.text ?? "Unknown",
+        location: {
+          lat: p.location!.latitude,
+          lng: p.location!.longitude,
+        },
+        types: p.types ?? [],
+        distanceMeters,
+        walkTimeMinutes: Math.round(distanceMeters / WALK_SPEED_METERS_PER_MIN),
+      }
+    })
 }
 
 export async function fetchAmenitiesByCategory(
@@ -141,6 +147,7 @@ export async function fetchNearbyTransitStops(
     name: p.name,
     location: p.location,
     distanceMeters: p.distanceMeters,
+    walkTimeMinutes: p.walkTimeMinutes,
     types: p.types,
   }))
 }

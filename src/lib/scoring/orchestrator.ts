@@ -6,7 +6,13 @@ import {
   fetchNearbyTransitStops,
 } from "@/lib/google/places"
 import { fetchMaxGrade } from "@/lib/google/elevation"
-import { findNearbyRoads, findBikeRoadInfo } from "@/lib/db/roads"
+import {
+  findNearbyRoads,
+  findBikeRoadInfo,
+  findPedestrianMetrics,
+  findBikeInfrastructure,
+} from "@/lib/db/roads"
+import { getNearbyReportsForScore } from "@/lib/db/reports"
 import { computeLakadScore } from "./lakad-score"
 import { computeCommuteScore } from "./commute-score"
 import { computeBikeScore } from "./bike-score"
@@ -26,18 +32,21 @@ export async function computeScoreForLocation(
   const cached = await getCachedScore(cell.id)
   if (cached) return { result: cached, cached: true }
 
-  const [amenities, transitStops, maxGrade, nearbyRoads, bikeRoads] =
+  const [amenities, transitStops, maxGrade, nearbyRoads, bikeRoads, pedestrianMetrics, bikeInfra, nearbyReports] =
     await Promise.all([
       fetchAmenitiesByCategory(cell.lat, cell.lng),
       fetchNearbyTransitStops(cell.lat, cell.lng),
       fetchMaxGrade(cell.lat, cell.lng),
       findNearbyRoads(cell.lat, cell.lng),
       findBikeRoadInfo(cell.lat, cell.lng),
+      findPedestrianMetrics(cell.lat, cell.lng),
+      findBikeInfrastructure(cell.lat, cell.lng),
+      getNearbyReportsForScore(cell.lat, cell.lng),
     ])
 
-  const lakadScore = computeLakadScore(amenities)
+  const lakadScore = computeLakadScore(amenities, pedestrianMetrics)
   const commuteScore = computeCommuteScore(transitStops, nearbyRoads)
-  const bikeScore = computeBikeScore(maxGrade, amenities, bikeRoads)
+  const bikeScore = computeBikeScore(maxGrade, amenities, bikeRoads, bikeInfra)
 
   const env = getEnv()
   const now = new Date()
@@ -51,6 +60,7 @@ export async function computeScoreForLocation(
     lakadScore,
     commuteScore,
     bikeScore,
+    nearbyReports,
     computedAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
   }

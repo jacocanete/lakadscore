@@ -1,5 +1,7 @@
 import { prisma } from "./client"
 import type { ReportType } from "@/generated/prisma/client"
+import type { NearbyReport, InfrastructureReportType } from "@/lib/types"
+import { haversineDistance } from "@/lib/scoring/decay"
 
 type CreateReportInput = {
   lat: number
@@ -65,6 +67,39 @@ export async function voteOnReport(
   })
 
   return vote
+}
+
+export async function getNearbyReportsForScore(
+  lat: number,
+  lng: number,
+  radiusKm: number = 1
+): Promise<NearbyReport[]> {
+  const degPerKm = 1 / 111.32
+  const latRange = radiusKm * degPerKm
+  const lngRange = radiusKm * degPerKm
+
+  const reports = await prisma.infrastructureReport.findMany({
+    where: {
+      lat: { gte: lat - latRange, lte: lat + latRange },
+      lng: { gte: lng - lngRange, lte: lng + lngRange },
+      status: { not: "rejected" },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  })
+
+  return reports
+    .map((r) => ({
+      id: r.id,
+      location: { lat: r.lat, lng: r.lng },
+      type: r.type as InfrastructureReportType,
+      description: r.description,
+      confirmations: r.confirmations,
+      status: r.status,
+      distanceMeters: haversineDistance(lat, lng, r.lat, r.lng),
+      createdAt: r.createdAt.toISOString(),
+    }))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
 }
 
 export async function getReportStats() {

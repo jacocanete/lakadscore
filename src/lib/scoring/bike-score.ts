@@ -1,5 +1,5 @@
-import type { BikeScore, BikeRoadDetail, PlaceResult, AmenityCategory } from "@/lib/types"
-import type { BikeRoadInfo } from "@/lib/db/roads"
+import type { BikeScore, BikeRoadDetail, BikeInfraDetail, PlaceResult, AmenityCategory } from "@/lib/types"
+import type { BikeRoadInfo, BikeInfraInfo } from "@/lib/db/roads"
 
 const MAX_GRADE_PERCENT = 10
 const FLAT_GRADE_PERCENT = 2
@@ -14,7 +14,6 @@ function hillScore(maxGradePercent: number): number {
   )
 }
 
-// Higher = more bike-friendly
 const ROAD_BIKE_FRIENDLINESS: Record<string, number> = {
   tertiary: 1.0,
   tertiary_link: 0.9,
@@ -28,24 +27,13 @@ const ROAD_BIKE_FRIENDLINESS: Record<string, number> = {
   motorway_link: 0.0,
 }
 
-/**
- * Score road infrastructure for bikeability.
- *
- * Considers:
- *  - What the nearest road type is (tertiary nearby = good, motorway only = bad)
- *  - Mix of road types within 800m (more tertiary/secondary = better)
- *  - Presence of dangerous roads very close (trunk/motorway < 100m = penalty)
- */
 function roadInfraScore(roads: BikeRoadInfo[]): number {
   if (roads.length === 0) return 30
 
-  // 1. Nearest road friendliness (0-40 pts)
   const nearest = roads[0]
   const nearestFriendliness = ROAD_BIKE_FRIENDLINESS[nearest.highway] ?? 0.3
   const nearestScore = nearestFriendliness * 40
 
-  // 2. Road mix score (0-40 pts)
-  // Weighted average of friendliness across all nearby road segments
   let totalSegments = 0
   let weightedFriendliness = 0
   for (const road of roads) {
@@ -56,8 +44,6 @@ function roadInfraScore(roads: BikeRoadInfo[]): number {
   const avgFriendliness = totalSegments > 0 ? weightedFriendliness / totalSegments : 0
   const mixScore = avgFriendliness * 40
 
-  // 3. Danger penalty (0 to -20 pts)
-  // If trunk or motorway is within 100m, penalize
   let dangerPenalty = 0
   for (const road of roads) {
     if (
@@ -73,11 +59,30 @@ function roadInfraScore(roads: BikeRoadInfo[]): number {
     }
   }
 
-  // 4. Density bonus (0-20 pts)
-  // More road segments nearby = more route options
   const densityBonus = Math.min(totalSegments / 30, 1) * 20
 
   return Math.max(0, Math.min(100, nearestScore + mixScore + densityBonus - dangerPenalty))
+}
+
+/**
+ * Score actual bike infrastructure from OSM tags.
+ *
+ * Based on WalkScore's methodology:
+ * - Dedicated cycleways weighted 3x
+ * - Bike lanes weighted 2x
+ * - Shared infrastructure (sharrows, bicycle=yes) weighted 1x
+ *
+ * Distance decay is already applied in the DB query.
+ * Normalized against a "good" baseline of ~2000m total weighted length.
+ */
+function bikeInfraScore(infra: BikeInfraInfo): number {
+  const weightedLength =
+    infra.cyclewayLengthMeters * 3 +
+    infra.bikeLaneLengthMeters * 2 +
+    infra.sharedLaneLengthMeters * 1
+
+  // 2000m weighted length within 1km = a well-served area
+  return Math.min((weightedLength / 2000) * 100, 100)
 }
 
 function getLabel(score: number): string {
@@ -91,7 +96,8 @@ function getLabel(score: number): string {
 export function computeBikeScore(
   maxGradePercent: number,
   amenitiesByCategory: Map<AmenityCategory, PlaceResult[]>,
-  bikeRoads: BikeRoadInfo[]
+  bikeRoads: BikeRoadInfo[],
+  bikeInfra: BikeInfraInfo
 ): BikeScore {
   const hill = hillScore(maxGradePercent)
 
@@ -105,9 +111,11 @@ export function computeBikeScore(
 
   const destinationScore = (categoriesWithNearby / totalCategories) * 100
   const road = roadInfraScore(bikeRoads)
+  const infra = bikeInfraScore(bikeInfra)
 
-  // 30% hill, 30% destinations, 40% road infrastructure
-  const rawScore = hill * 0.3 + destinationScore * 0.3 + road * 0.4
+  // Rebalanced weights with dedicated infra component:
+  // 25% hill, 20% destinations, 30% road type safety, 25% bike infrastructure
+  const rawScore = hill * 0.25 + destinationScore * 0.2 + road * 0.3 + infra * 0.25
   const finalScore = Math.round(Math.min(Math.max(rawScore, 0), 100))
 
   const nearbyRoads: BikeRoadDetail[] = bikeRoads.map((r) => ({
@@ -122,6 +130,12 @@ export function computeBikeScore(
     hillScore: Math.round(hill),
     destinationScore: Math.round(destinationScore),
     roadScore: Math.round(road),
+    infraScore: Math.round(infra),
     nearbyRoads,
+    bikeInfra: {
+      cyclewayLengthMeters: bikeInfra.cyclewayLengthMeters,
+      bikeLaneLengthMeters: bikeInfra.bikeLaneLengthMeters,
+      sharedLaneLengthMeters: bikeInfra.sharedLaneLengthMeters,
+    },
   }
 }

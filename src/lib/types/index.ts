@@ -27,6 +27,7 @@ export type PlaceResult = {
   location: LatLng
   types: string[]
   distanceMeters: number
+  walkTimeMinutes: number
 }
 
 export type CategoryScore = {
@@ -34,13 +35,21 @@ export type CategoryScore = {
   score: number
   nearestDistanceMeters: number | null
   placesFound: number
+  places: PlaceResult[]
+}
+
+export type PedestrianFriendliness = {
+  intersectionDensity: number
+  avgBlockLengthMeters: number | null
+  roadDensityKmPerSqKm: number
+  modifier: number
 }
 
 export type LakadScore = {
   score: number
   label: string
   categories: CategoryScore[]
-  pedestrianModifier: number
+  pedestrianFriendliness: PedestrianFriendliness
 }
 
 export type NearbyTransitStop = {
@@ -48,6 +57,7 @@ export type NearbyTransitStop = {
   name: string
   location: LatLng
   distanceMeters: number
+  walkTimeMinutes: number
   types: string[]
 }
 
@@ -77,13 +87,32 @@ export type BikeRoadDetail = {
   count: number
 }
 
+export type BikeInfraDetail = {
+  cyclewayLengthMeters: number
+  bikeLaneLengthMeters: number
+  sharedLaneLengthMeters: number
+}
+
 export type BikeScore = {
   score: number
   label: string
   hillScore: number
   destinationScore: number
   roadScore: number
+  infraScore: number
   nearbyRoads: BikeRoadDetail[]
+  bikeInfra: BikeInfraDetail
+}
+
+export type NearbyReport = {
+  id: string
+  location: LatLng
+  type: InfrastructureReportType
+  description: string | null
+  confirmations: number
+  status: string
+  distanceMeters: number
+  createdAt: string
 }
 
 export type ScoreResult = {
@@ -92,6 +121,7 @@ export type ScoreResult = {
   lakadScore: LakadScore
   commuteScore: CommuteScore
   bikeScore: BikeScore
+  nearbyReports: NearbyReport[]
   computedAt: string
   expiresAt: string
 }
@@ -148,4 +178,39 @@ export type CachedScore = {
   result: ScoreResult
   computedAt: Date
   expiresAt: Date
+}
+
+export type FloodSusceptibility = "Low" | "Moderate" | "High" | "Very High" | null
+
+export type LandslideSusceptibility =
+  | "Debris Flow"
+  | "Low"
+  | "Moderate"
+  | "High"
+  | "Very High"
+  | null
+
+export type StormSurgeLevel = ">1m" | ">1m to 4m" | ">4m to 12m" | null
+
+export type HazardAssessment = {
+  location: LatLng
+  flood: {
+    susceptibility: FloodSusceptibility
+    code: string | null
+  }
+  landslide: {
+    susceptibility: LandslideSusceptibility
+    code: string | null
+  }
+  stormSurge: {
+    level: StormSurgeLevel
+    code: string | null
+  }
+  assessedAt: string
+  source: "HazardHunterPH"
+  dataProviders: {
+    flood: "MGB"
+    landslide: "MGB"
+    stormSurge: "DOST-PAGASA"
+  }
 }
