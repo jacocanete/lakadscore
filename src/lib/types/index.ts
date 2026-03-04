@@ -192,20 +192,28 @@ export type LandslideSusceptibility =
 
 export type StormSurgeLevel = ">1m" | ">1m to 4m" | ">4m to 12m" | null
 
+export type HazardLayerResult<T> = {
+  data: T
+  error: null
+} | {
+  data: null
+  error: string
+}
+
 export type HazardAssessment = {
   location: LatLng
-  flood: {
+  flood: HazardLayerResult<{
     susceptibility: FloodSusceptibility
     code: string | null
-  }
-  landslide: {
+  }>
+  landslide: HazardLayerResult<{
     susceptibility: LandslideSusceptibility
     code: string | null
-  }
-  stormSurge: {
-    level: StormSurgeLevel
+  }>
+  stormSurge: HazardLayerResult<{
+    susceptibility: StormSurgeLevel
     code: string | null
-  }
+  }>
   assessedAt: string
   source: "HazardHunterPH"
   dataProviders: {

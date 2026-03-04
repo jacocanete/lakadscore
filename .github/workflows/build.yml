@@ -1,8 +1,12 @@
-name: Build and Push
+name: Build and Deploy
 
 on:
   push:
     branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -29,7 +33,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha
+            type=sha,prefix=
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
@@ -38,3 +42,23 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Deploy to Coolify
+        run: |
+          HTTP_RESPONSE=$(curl --silent --show-error --location --write-out "\nHTTP_STATUS:%{http_code}" \
+            --cookie-jar /tmp/cf-cookies \
+            --request GET '${{ vars.COOLIFY_WEBHOOK }}' \
+            --header 'Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}' \
+            --header 'CF-Access-Client-Id: ${{ secrets.CF_ACCESS_CLIENT_ID }}' \
+            --header 'CF-Access-Client-Secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}')
+
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -1 | sed 's/HTTP_STATUS://')
+
+          echo "Status: $HTTP_STATUS"
+          echo "Response: $HTTP_BODY"
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "::error::Deploy failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
