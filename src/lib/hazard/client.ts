@@ -4,7 +4,9 @@ import type {
   FloodSusceptibility,
   LandslideSusceptibility,
   StormSurgeLevel,
+  EmergencyFacilitySummary,
 } from "@/lib/types"
+import { findNearbyEmergencyFacilities } from "@/lib/db/facilities"
 
 const TOKEN_URL = "https://hazardhunter.georisk.gov.ph/get-token"
 const MAP_SERVICE_BASE = "https://ulap-hazards.georisk.gov.ph/arcgis/rest/services"
@@ -99,6 +101,13 @@ function errorMessage(err: unknown): string {
 }
 
 export async function assessHazards(lat: number, lng: number): Promise<HazardAssessment> {
+  let facilities: EmergencyFacilitySummary[] = []
+  try {
+    facilities = await findNearbyEmergencyFacilities(lat, lng)
+  } catch (err) {
+    console.error("Failed to fetch nearby emergency facilities:", err)
+  }
+
   let token: string
   try {
     token = await getToken()
@@ -109,6 +118,7 @@ export async function assessHazards(lat: number, lng: number): Promise<HazardAss
       flood: { data: null, error: msg },
       landslide: { data: null, error: msg },
       stormSurge: { data: null, error: msg },
+      nearbyEmergencyFacilities: facilities,
       assessedAt: new Date().toISOString(),
       source: "HazardHunterPH",
       dataProviders: { flood: "MGB", landslide: "MGB", stormSurge: "DOST-PAGASA" },
@@ -150,6 +160,7 @@ export async function assessHazards(lat: number, lng: number): Promise<HazardAss
     flood,
     landslide,
     stormSurge,
+    nearbyEmergencyFacilities: facilities,
     assessedAt: new Date().toISOString(),
     source: "HazardHunterPH",
     dataProviders: { flood: "MGB", landslide: "MGB", stormSurge: "DOST-PAGASA" },

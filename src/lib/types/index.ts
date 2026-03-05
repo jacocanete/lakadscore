@@ -200,6 +200,20 @@ export type HazardLayerResult<T> = {
   error: string
 }
 
+export type EmergencyFacilityCategory = "police" | "fire_station" | "hospital"
+
+export type NearbyEmergencyFacility = {
+  category: EmergencyFacilityCategory
+  name: string | null
+  distanceMeters: number
+}
+
+export type EmergencyFacilitySummary = {
+  category: EmergencyFacilityCategory
+  nearest: NearbyEmergencyFacility[]
+  countWithinRadius: number
+}
+
 export type HazardAssessment = {
   location: LatLng
   flood: HazardLayerResult<{
@@ -214,6 +228,7 @@ export type HazardAssessment = {
     susceptibility: StormSurgeLevel
     code: string | null
   }>
+  nearbyEmergencyFacilities: EmergencyFacilitySummary[]
   assessedAt: string
   source: "HazardHunterPH"
   dataProviders: {

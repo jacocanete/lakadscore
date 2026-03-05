@@ -2,9 +2,13 @@ import type { AmenityCategory, NearbyTransitStop, PlaceResult } from "@/lib/type
 import { AMENITY_CATEGORIES } from "@/lib/config/constants"
 import { getEnv } from "@/lib/config/env"
 import { haversineDistance } from "@/lib/scoring/decay"
+import { fetchOsmAmenities } from "@/lib/db/amenities"
 
 const PLACES_API_URL =
   "https://places.googleapis.com/v1/places:searchNearby"
+
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 500
 
 type NearbySearchResponse = {
   places?: {
@@ -13,6 +17,10 @@ type NearbySearchResponse = {
     location?: { latitude: number; longitude: number }
     types?: string[]
   }[]
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function searchNearby(
@@ -35,23 +43,45 @@ async function searchNearby(
     rankPreference: "DISTANCE",
   }
 
-  const res = await fetch(PLACES_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": env.GOOGLE_MAPS_API_KEY,
-      "X-Goog-FieldMask":
-        "places.id,places.displayName,places.location,places.types",
-    },
-    body: JSON.stringify(body),
-  })
+  let lastError: Error | null = null
 
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Places API error ${res.status}: ${text}`)
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await sleep(RETRY_DELAY_MS * attempt)
+    }
+
+    try {
+      const res = await fetch(PLACES_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": env.GOOGLE_MAPS_API_KEY,
+          "X-Goog-FieldMask":
+            "places.id,places.displayName,places.location,places.types",
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (res.ok) {
+        return res.json() as Promise<NearbySearchResponse>
+      }
+
+      if (res.status >= 500) {
+        lastError = new Error(`Places API error ${res.status}`)
+        continue
+      }
+
+      const text = await res.text()
+      throw new Error(`Places API error ${res.status}: ${text}`)
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Places API error 4")) {
+        throw err
+      }
+      lastError = err instanceof Error ? err : new Error(String(err))
+    }
   }
 
-  return res.json() as Promise<NearbySearchResponse>
+  throw lastError ?? new Error("Places API request failed after retries")
 }
 
 const WALK_SPEED_METERS_PER_MIN = 80
@@ -99,12 +129,19 @@ export async function fetchAmenitiesByCategory(
     string[],
   ][]
 
-  // Fetch all categories in parallel
   const settled = await Promise.allSettled(
     entries.map(async ([category, types]) => {
-      const response = await searchNearby(lat, lng, types, radius)
-      const places = toPlaceResults(response, lat, lng)
-      return { category, places }
+      try {
+        const response = await searchNearby(lat, lng, types, radius)
+        return { category, places: toPlaceResults(response, lat, lng) }
+      } catch (err) {
+        console.error(
+          `Google Places failed for ${category} after retries, falling back to OSM:`,
+          err instanceof Error ? err.message : err
+        )
+        const osmPlaces = await fetchOsmAmenities(lat, lng, category, radius)
+        return { category, places: osmPlaces }
+      }
     })
   )
 
@@ -112,7 +149,7 @@ export async function fetchAmenitiesByCategory(
     if (s.status === "fulfilled") {
       result.set(s.value.category, s.value.places)
     } else {
-      console.error("Places API category fetch failed:", s.reason)
+      console.error("Amenity fetch failed entirely:", s.reason)
     }
   }
 
