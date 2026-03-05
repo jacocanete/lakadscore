@@ -70,3 +70,17 @@ export function checkExpensiveRateLimit(key: string): {
   entry.count++
   return { allowed: true, remaining: EXPENSIVE_LIMIT - entry.count }
 }
+
+const EVICTION_INTERVAL_MS = 5 * 60_000
+
+function evictStaleEntries(): void {
+  const now = Date.now()
+  for (const [key, entry] of store) {
+    if (now - entry.windowStart >= WINDOW_MS) store.delete(key)
+  }
+  for (const [key, entry] of expensiveStore) {
+    if (now - entry.windowStart >= EXPENSIVE_WINDOW_MS) expensiveStore.delete(key)
+  }
+}
+
+setInterval(evictStaleEntries, EVICTION_INTERVAL_MS).unref()

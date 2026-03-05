@@ -9,6 +9,10 @@ const envSchema = z.object({
   RATE_LIMIT_RPM: z.coerce.number().default(30),
   LAKADSCORE_API_KEY: z.string().min(1),
   PORT: z.coerce.number().default(3001),
+  DB_POOL_MAX: z.coerce.number().default(50),
+  DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().default(30_000),
+  DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().default(10_000),
+  MAX_CONCURRENT_SCORE_COMPUTATIONS: z.coerce.number().default(20),
 })
 
 export type Env = z.infer<typeof envSchema>

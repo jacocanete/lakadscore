@@ -1,15 +1,19 @@
 import { z } from "zod"
 import { getEnv } from "@/lib/config/env"
-import { computeScoreForLocation } from "@/lib/scoring/orchestrator"
+import { computeScoreForLocation, computeSemaphore, inflightScores } from "@/lib/scoring/orchestrator"
 import { checkRateLimit, checkExpensiveRateLimit } from "@/lib/cache/rate-limiter"
 import { snapToGrid } from "@/lib/grid/snap"
 import { getCachedScore, getCacheStats } from "@/lib/db/score-cache"
 import { createReport, getNearbyReports, voteOnReport, getReportStats } from "@/lib/db/reports"
 import { createTransitRoute, getTransitRoutes, confirmTransitRoute } from "@/lib/db/transit-routes"
 import { assessHazards } from "@/lib/hazard/client"
+import { getPool } from "@/lib/db/client"
 import type { ReportType } from "@/generated/prisma/client"
 
 const env = getEnv()
+
+const MAX_QUEUED_REQUESTS = 200
+let activeRequests = 0
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
@@ -91,6 +95,7 @@ async function handleGetScore(req: Request): Promise<Response> {
       return json(cached, 200, {
         "X-RateLimit-Remaining": String(remaining),
         "X-Cache": "HIT",
+        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
       })
     }
 
@@ -108,6 +113,7 @@ async function handleGetScore(req: Request): Promise<Response> {
     return json(result, 200, {
       "X-RateLimit-Remaining": String(remaining),
       "X-Cache": "MISS",
+      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
     })
   } catch (err) {
     console.error("Score computation failed:", err)
@@ -376,11 +382,27 @@ async function handleHealth(): Promise<Response> {
       getReportStats(),
     ])
 
+    const pool = getPool()
+    const poolStats = pool
+      ? {
+          total: pool.totalCount,
+          idle: pool.idleCount,
+          waiting: pool.waitingCount,
+        }
+      : null
+
     return json({
       status: "ok",
       timestamp: new Date().toISOString(),
       cache,
       reports,
+      pool: poolStats,
+      concurrency: {
+        activeComputations: computeSemaphore.active,
+        queuedComputations: computeSemaphore.pending,
+        inflightDedup: inflightScores.size,
+        activeRequests,
+      },
     })
   } catch (err) {
     console.error("Health check failed:", err)
@@ -440,6 +462,14 @@ const server = Bun.serve({
       })
     }
 
+    if (path !== "/api/health" && activeRequests >= MAX_QUEUED_REQUESTS) {
+      return json(
+        { error: "Server is overloaded. Please retry shortly." },
+        503,
+        { "Retry-After": "5" }
+      )
+    }
+
     if (path !== "/api/health" && !authenticate(req)) {
       return json({ error: "Unauthorized" }, 401)
     }
@@ -454,7 +484,12 @@ const server = Bun.serve({
       return json({ error: "Method not allowed" }, 405)
     }
 
-    return handler(req)
+    activeRequests++
+    try {
+      return await handler(req)
+    } finally {
+      activeRequests--
+    }
   },
 })
 
